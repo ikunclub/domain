@@ -1,0 +1,57 @@
+name: Build IPTV GeoSite and GeoIP
+
+on:
+  schedule:
+    - cron: '0 2 * * *' # 每天 UTC 02:00 运行
+  workflow_dispatch:
+
+# 授予创建和发布 Release 的写权限
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.22'
+          cache: false
+
+      - name: Extract Domains and IPs
+        run: python build.py
+
+      - name: Build Dat Files
+        env:
+          ASSUME_NO_MOVING_GC_UNSAFE_RISK_IT_WITH: go1.22
+        run: |
+          go mod init builder
+          go get github.com/v2fly/v2ray-core/v4@v4.45.2
+          go get go4.org/unsafe/assume-no-moving-gc@latest
+          go mod tidy
+          go run maker.go
+
+      # 获取北京时间并写入环境变量
+      - name: Get Current Time
+        run: |
+          echo "BUILD_TIME=$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_ENV
+
+      # 使用 GitHub 官方 CLI 发布/更新 Release（无 Node.js 依赖警告）
+      - name: Publish to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete latest -y --cleanup-tag 2>/dev/null || true
+          gh release create latest geosite-iptv.dat geoip-iptv.dat \
+            --title "${{ env.BUILD_TIME }}" \
+            --notes "自动更新的 IPTV 规则文件（Geosite / GeoIP）。
+          构建时间：${{ env.BUILD_TIME }} (CST)"
